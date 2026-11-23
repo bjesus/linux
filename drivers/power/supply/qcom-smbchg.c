@@ -942,9 +942,18 @@ static void smbchg_detect_work(struct work_struct *work)
 				ERR_PTR(ret));
 			return;
 		}
+	} else if (usb_present && usb_type == POWER_SUPPLY_USB_TYPE_SDP) {
+		ret = smbchg_usb_set_ilim(chip, 500000);
+		if (ret < 0) {
+			dev_err(chip->dev,
+				"Failed to set SDP current limit: %pe\n",
+				ERR_PTR(ret));
+			return;
+		}
 	}
 
 	smbchg_extcon_update(chip, usb_present, otg_present);
+	power_supply_changed(chip->usb_psy);
 
 	if (!has_role_sw)
 		return;
@@ -1475,14 +1484,15 @@ static int smbchg_init(struct smbchg_chip *chip)
 	 * - Enable automatic recharge
 	 * - Enable current termination
 	 * - Set pre to fast charging transition to automatic
+	 * - Set charge enable polarity to active low
 	 * - Set charge enable source to command
 	 */
 	ret = qcom_pmic_sec_masked_write(
 		chip->regmap, chip->base + SMBCHG_CHGR_CHGR_CFG2,
 		CHARGER_INHIBIT_BIT | AUTO_RECHG_BIT | I_TERM_BIT |
-			P2F_CHG_TRAN_BIT | CHG_EN_SRC_BIT,
+			P2F_CHG_TRAN_BIT | CHG_EN_POLARITY_BIT | CHG_EN_SRC_BIT,
 		CHG_INHIBIT_EN | AUTO_RCHG_EN | CURRENT_TERM_EN |
-			PRE_FAST_AUTO | CHG_EN_SRC_CMD);
+			PRE_FAST_AUTO | CHG_EN_POLARITY_BIT | CHG_EN_SRC_CMD);
 	if (ret)
 		return ret;
 

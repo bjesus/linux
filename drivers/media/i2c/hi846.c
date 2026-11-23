@@ -1356,6 +1356,12 @@ static int hi846_set_ctrl(struct v4l2_ctrl *ctrl)
 	ret = pm_runtime_get_if_in_use(&client->dev);
 	if (!ret || ret == -EAGAIN)
 		return 0;
+	/*
+	 * pm_runtime_get_if_in_use() returns 1 when the device is in use.
+	 * Don't let that leak into the return value through the cases that
+	 * only update ret on error (exposure, vblank), or stream-on fails.
+	 */
+	ret = 0;
 
 	switch (ctrl->id) {
 	case V4L2_CID_ANALOGUE_GAIN:
@@ -1687,6 +1693,36 @@ static int __maybe_unused hi846_resume(struct device *dev)
 	return hi846_power_on(hi846);
 }
 
+/*
+ * Not every mode has a register list for both lane configurations, so pick
+ * the nearest size among the modes that support the lane count in use.
+ */
+static const struct hi846_mode *hi846_find_mode(struct hi846 *hi846,
+						u32 width, u32 height)
+{
+	const struct hi846_mode *best = NULL;
+	unsigned int i;
+	u32 best_err = U32_MAX;
+
+	for (i = 0; i < ARRAY_SIZE(supported_modes); i++) {
+		const struct hi846_mode *mode = &supported_modes[i];
+		u32 err;
+
+		if (hi846->nr_lanes == 2 ?
+		    !mode->reg_list_2lane.num_of_regs :
+		    !mode->reg_list_4lane.num_of_regs)
+			continue;
+
+		err = abs_diff(mode->width, width) + abs_diff(mode->height, height);
+		if (err < best_err) {
+			best_err = err;
+			best = mode;
+		}
+	}
+
+	return best;
+}
+
 static int hi846_set_format(struct v4l2_subdev *sd,
 			    struct v4l2_subdev_state *sd_state,
 			    struct v4l2_subdev_format *format)
@@ -1695,6 +1731,7 @@ static int hi846_set_format(struct v4l2_subdev *sd,
 	struct v4l2_mbus_framefmt *mf = &format->format;
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	const struct hi846_datafmt *fmt = hi846_find_datafmt(mf->code);
+	const struct hi846_mode *mode;
 	u32 tgt_fps;
 	s32 vblank_def, h_blank;
 
@@ -1709,18 +1746,11 @@ static int hi846_set_format(struct v4l2_subdev *sd,
 		return 0;
 	}
 
-	if (hi846->nr_lanes == 2) {
-		if (!hi846->cur_mode->reg_list_2lane.num_of_regs) {
-			dev_err(&client->dev,
-				"this mode is not supported for 2 lanes\n");
-			return -EINVAL;
-		}
-	} else {
-		if (!hi846->cur_mode->reg_list_4lane.num_of_regs) {
-			dev_err(&client->dev,
-				"this mode is not supported for 4 lanes\n");
-			return -EINVAL;
-		}
+	mode = hi846_find_mode(hi846, mf->width, mf->height);
+	if (!mode) {
+		dev_err(&client->dev,
+			"no mode is supported for %d lanes\n", hi846->nr_lanes);
+		return -EINVAL;
 	}
 
 	mutex_lock(&hi846->mutex);
@@ -1731,11 +1761,7 @@ static int hi846_set_format(struct v4l2_subdev *sd,
 	}
 
 	hi846->fmt = fmt;
-
-	hi846->cur_mode =
-		v4l2_find_nearest_size(supported_modes,
-				       ARRAY_SIZE(supported_modes),
-				       width, height, mf->width, mf->height);
+	hi846->cur_mode = mode;
 	dev_dbg(&client->dev, "%s: found mode: %dx%d\n", __func__,
 		hi846->cur_mode->width, hi846->cur_mode->height);
 

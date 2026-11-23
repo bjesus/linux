@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Huawei MediaPad M3 Lite 8 (CPN-L03 / CPN-L09 / CPN-W09 / CPN-AL00)
+ *
+ * Copyright (c) 2026
+ */
+
+/dts-v1/;
+
+#include "msm8940-huawei-bach.dtsi"
+
+/ {
+	model = "Huawei MediaPad M3 Lite 8 (CPN)";
+	compatible = "huawei,cpn", "qcom,msm8940";
+
+	qcom,msm-id = <QCOM_ID_MSM8940 0>;
+	qcom,board-id = <0x1f77 0>,	/* CPN-L03 */
+			<0x1f78 0>,	/* CPN-L09 */
+			<0x1f75 0>,	/* CPN-W09 */
+			<0x1f74 0>;	/* CPN-AL00 */
+
+	/* HB3080G1EBC: 4800 mAh, 4.35 V */
+	battery: battery {
+		compatible = "simple-battery";
+
+		charge-full-design-microamp-hours = <4800000>;
+		constant-charge-current-max-microamp = <2000000>;
+		charge-term-current-microamp = <100000>;
+		voltage-min-design-microvolt = <3250000>;
+		voltage-max-design-microvolt = <4350000>;
+	};
+};
+
+&panel {
+	/*
+	 * 8.0" 1200x1920 Novatek NT51021 panel from INX or AUO.
+	 * lk2nd prepends the vendor-specific compatible of the detected module
+	 * (huawei,cpn-nt51021-inx / huawei,cpn-nt51021-auo / huawei,cpn-nt51021-auob).
+	 */
+	compatible = "huawei,cpn-panel";
+};
+
+&pmi8950_fg {
+	monitored-battery = <&battery>;
+};
+
+&pmi8950_smbcharger {
+	monitored-battery = <&battery>;
+};
+
+&sound {
+	model = "huawei-cpn";
+};

@@ -46,6 +46,8 @@
 			operating-points-v2 = <&cpu_opp_table_c0>;
 			next-level-cache = <&l2_0>;
 			#cooling-cells = <2>;
+			power-domains = <&cpu_pd0>;
+			power-domain-names = "psci";
 
 			l2_0: l2-cache {
 				compatible = "cache";
@@ -64,6 +66,8 @@
 			operating-points-v2 = <&cpu_opp_table_c0>;
 			next-level-cache = <&l2_0>;
 			#cooling-cells = <2>;
+			power-domains = <&cpu_pd1>;
+			power-domain-names = "psci";
 		};
 
 		cpu2: cpu@2 {
@@ -75,6 +79,8 @@
 			operating-points-v2 = <&cpu_opp_table_c0>;
 			next-level-cache = <&l2_0>;
 			#cooling-cells = <2>;
+			power-domains = <&cpu_pd2>;
+			power-domain-names = "psci";
 		};
 
 		cpu3: cpu@3 {
@@ -86,6 +92,8 @@
 			operating-points-v2 = <&cpu_opp_table_c0>;
 			next-level-cache = <&l2_0>;
 			#cooling-cells = <2>;
+			power-domains = <&cpu_pd3>;
+			power-domain-names = "psci";
 		};
 
 		cpu4: cpu@100 {
@@ -97,7 +105,7 @@
 			clocks = <&apcs1>;
 			operating-points-v2 = <&cpu_opp_table_c1>;
 			#cooling-cells = <2>;
-			power-domains = <&cpu_pd0>;
+			power-domains = <&cpu_pd4>;
 			power-domain-names = "psci";
 
 			l2_1: l2-cache {
@@ -117,7 +125,7 @@
 			clocks = <&apcs1>;
 			operating-points-v2 = <&cpu_opp_table_c1>;
 			#cooling-cells = <2>;
-			power-domains = <&cpu_pd1>;
+			power-domains = <&cpu_pd5>;
 			power-domain-names = "psci";
 		};
 
@@ -130,7 +138,7 @@
 			clocks = <&apcs1>;
 			operating-points-v2 = <&cpu_opp_table_c1>;
 			#cooling-cells = <2>;
-			power-domains = <&cpu_pd2>;
+			power-domains = <&cpu_pd6>;
 			power-domain-names = "psci";
 		};
 
@@ -143,7 +151,7 @@
 			clocks = <&apcs1>;
 			operating-points-v2 = <&cpu_opp_table_c1>;
 			#cooling-cells = <2>;
-			power-domains = <&cpu_pd3>;
+			power-domains = <&cpu_pd7>;
 			power-domain-names = "psci";
 		};
 
@@ -188,25 +196,59 @@
 		};
 
 		domain-idle-states {
-			cluster_sleep_0: cluster-power-collapse {
+			little_cluster_gdhs: cluster-sleep-0-0 {
+				compatible = "domain-idle-state";
+				arm,psci-suspend-param = <0x41000043>;
+				entry-latency-us = <380>;
+				exit-latency-us = <337>;
+				min-residency-us = <5664>;
+			};
+
+			little_cluster_pc: cluster-sleep-0-1 {
 				compatible = "domain-idle-state";
 				arm,psci-suspend-param = <0x41000053>;
-				entry-latency-us = <700>;
-				exit-latency-us = <1000>;
-				min-residency-us = <6500>;
+				entry-latency-us = <565>;
+				exit-latency-us = <415>;
+				min-residency-us = <6647>;
+			};
+
+			big_cluster_gdhs: cluster-sleep-1-0 {
+				compatible = "domain-idle-state";
+				arm,psci-suspend-param = <0x41000043>;
+				entry-latency-us = <360>;
+				exit-latency-us = <267>;
+				min-residency-us = <4179>;
+			};
+
+			big_cluster_pc: cluster-sleep-1-1 {
+				compatible = "domain-idle-state";
+				arm,psci-suspend-param = <0x41000053>;
+				entry-latency-us = <574>;
+				exit-latency-us = <305>;
+				min-residency-us = <5893>;
 			};
 		};
 
 		idle-states {
 			entry-method = "psci";
 
-			cpu_sleep_0: cpu-sleep-0 {
+			little_cpu_sleep_0: cpu-sleep-0-0 {
 				compatible = "arm,idle-state";
-				idle-state-name = "standalone-power-collapse";
+				idle-state-name = "little-power-collapse";
 				arm,psci-suspend-param = <0x40000003>;
-				entry-latency-us = <125>;
-				exit-latency-us = <180>;
-				min-residency-us = <595>;
+				entry-latency-us = <179>;
+				exit-latency-us = <221>;
+				min-residency-us = <1581>;
+				local-timer-stop;
+			};
+
+			big_cpu_sleep_0: cpu-sleep-1-0 {
+				compatible = "arm,idle-state";
+				idle-state-name = "big-power-collapse";
+				arm,psci-suspend-param = <0x40000003>;
+				entry-latency-us = <136>;
+				exit-latency-us = <190>;
+				min-residency-us = <2941>;
 				local-timer-stop;
 			};
 		};
@@ -405,33 +447,67 @@
 		method = "smc";
 		force-psci-domains;
 
-		cluster_pd: power-domain-cluster {
-			#power-domain-cells = <0>;
-			domain-idle-states = <&cluster_sleep_0>;
-		};
-
 		cpu_pd0: power-domain-cpu0 {
 			#power-domain-cells = <0>;
-			power-domains = <&cluster_pd>;
-			domain-idle-states = <&cpu_sleep_0>;
+			power-domains = <&cluster0_pd>;
+			domain-idle-states = <&little_cpu_sleep_0>;
 		};
 
 		cpu_pd1: power-domain-cpu1 {
 			#power-domain-cells = <0>;
-			power-domains = <&cluster_pd>;
-			domain-idle-states = <&cpu_sleep_0>;
+			power-domains = <&cluster0_pd>;
+			domain-idle-states = <&little_cpu_sleep_0>;
 		};
 
 		cpu_pd2: power-domain-cpu2 {
 			#power-domain-cells = <0>;
-			power-domains = <&cluster_pd>;
-			domain-idle-states = <&cpu_sleep_0>;
+			power-domains = <&cluster0_pd>;
+			domain-idle-states = <&little_cpu_sleep_0>;
 		};
 
 		cpu_pd3: power-domain-cpu3 {
 			#power-domain-cells = <0>;
-			power-domains = <&cluster_pd>;
-			domain-idle-states = <&cpu_sleep_0>;
+			power-domains = <&cluster0_pd>;
+			domain-idle-states = <&little_cpu_sleep_0>;
+		};
+
+		cpu_pd4: power-domain-cpu4 {
+			#power-domain-cells = <0>;
+			power-domains = <&cluster1_pd>;
+			domain-idle-states = <&big_cpu_sleep_0>;
+		};
+
+		cpu_pd5: power-domain-cpu5 {
+			#power-domain-cells = <0>;
+			power-domains = <&cluster1_pd>;
+			domain-idle-states = <&big_cpu_sleep_0>;
+		};
+
+		cpu_pd6: power-domain-cpu6 {
+			#power-domain-cells = <0>;
+			power-domains = <&cluster1_pd>;
+			domain-idle-states = <&big_cpu_sleep_0>;
+		};
+
+		cpu_pd7: power-domain-cpu7 {
+			#power-domain-cells = <0>;
+			power-domains = <&cluster1_pd>;
+			domain-idle-states = <&big_cpu_sleep_0>;
+		};
+
+		/*
+		 * System-level PSCI states (0x42000153/0x42000253/0x42000353) are omitted:
+		 * MSM8940 TZ requires downstream CCI SPM/MPM/RPM coordination (0x42000253
+		 * resets into a boot loop and 0x42000153 freezes userspace once all cores idle).
+		 */
+		cluster0_pd: power-domain-cluster0 {
+			#power-domain-cells = <0>;
+			domain-idle-states = <&little_cluster_gdhs>, <&little_cluster_pc>;
+		};
+
+		cluster1_pd: power-domain-cluster1 {
+			#power-domain-cells = <0>;
+			domain-idle-states = <&big_cluster_gdhs>, <&big_cluster_pc>;
 		};
 	};
 

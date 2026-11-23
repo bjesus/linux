@@ -1,0 +1,1014 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Common device tree for the Huawei MediaPad M3 Lite family ("bach"):
+ *  - MediaPad M3 Lite 8  (CPN-xxx, internal name "chopin")
+ *  - MediaPad M3 Lite 10 (BAH-xxx, internal name "bach")
+ *
+ * Copyright (c) 2026
+ */
+
+#include <dt-bindings/arm/qcom,ids.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/leds/common.h>
+#include "msm8940.dtsi"
+#include "pm8937.dtsi"
+#include "pmi8950.dtsi"
+#include "msm8937-qdsp6.dtsi"
+
+/ {
+	chassis-type = "tablet";
+
+	aliases {
+		serial0 = &blsp1_uart2;
+		mmc0 = &sdhc_1;
+		mmc1 = &sdhc_2;
+	};
+
+	chosen {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		stdout-path = "framebuffer0";
+
+		/* Continuous splash framebuffer set up by the bootloader (1200x1920 RGB888) */
+		framebuffer0: framebuffer@90001000 {
+			compatible = "simple-framebuffer";
+			reg = <0x0 0x90001000 0x0 (1200 * 1920 * 3)>;
+			width = <1200>;
+			height = <1920>;
+			stride = <(1200 * 3)>;
+			format = "r8g8b8";
+
+			clocks = <&gcc GCC_MDSS_AHB_CLK>,
+				 <&gcc GCC_MDSS_AXI_CLK>,
+				 <&gcc GCC_MDSS_VSYNC_CLK>,
+				 <&gcc GCC_MDSS_MDP_CLK>,
+				 <&gcc GCC_MDSS_BYTE0_CLK>,
+				 <&gcc GCC_MDSS_PCLK0_CLK>,
+				 <&gcc GCC_MDSS_ESC0_CLK>;
+			power-domains = <&gcc MDSS_GDSC>;
+			status = "disabled";
+		};
+	};
+
+	reserved-memory {
+		framebuffer_mem: memory@90001000 {
+			reg = <0x0 0x90001000 0x0 (1200 * 1920 * 3)>;
+			no-map;
+		};
+
+		/* rest of the 20 MiB bootloader splash region */
+		reserved@90000000 {
+			reg = <0x0 0x90000000 0x0 0x1000>;
+			no-map;
+		};
+
+		reserved@90697000 {
+			reg = <0x0 0x90697000 0x0 0xd69000>;
+			no-map;
+		};
+
+
+		/*
+		 * The msm8937.dtsi rmtfs region (0x92100000 + 1.5 MiB) would overlap
+		 * Huawei's TrustZone log at 0x92200000; the modem learns the address
+		 * via QMI, so place it in the free area below instead.
+		 */
+		/delete-node/ rmtfs@92100000;
+
+		rmtfs@91e00000 {
+			compatible = "qcom,rmtfs-mem";
+			reg = <0x0 0x91e00000 0x0 0x180000>;
+			no-map;
+
+			qcom,client-id = <1>;
+		};
+
+		/* Huawei TrustZone log + TZ apps, must stay untouched */
+		reserved@92200000 {
+			reg = <0x0 0x92200000 0x0 0x1b00000>;
+			no-map;
+		};
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		pinctrl-0 = <&gpio_keys_default &hall_sensor_default>;
+		pinctrl-names = "default";
+
+		button-volup {
+			label = "Volume Up";
+			linux,code = <KEY_VOLUMEUP>;
+			gpios = <&tlmm 91 GPIO_ACTIVE_LOW>;
+			debounce-interval = <15>;
+		};
+
+		/* AK8789 hall sensor for the folio cover */
+		switch-hall-sensor {
+			label = "Hall Sensor";
+			linux,input-type = <EV_SW>;
+			linux,code = <SW_LID>;
+			gpios = <&tlmm 127 GPIO_ACTIVE_LOW>;
+			debounce-interval = <15>;
+			linux,can-disable;
+			wakeup-source;
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		pinctrl-0 = <&gpio_leds_default>;
+		pinctrl-names = "default";
+
+		led-red {
+			gpios = <&tlmm 128 GPIO_ACTIVE_HIGH>;
+			color = <LED_COLOR_ID_RED>;
+			function = LED_FUNCTION_STATUS;
+		};
+
+		led-green {
+			gpios = <&tlmm 125 GPIO_ACTIVE_HIGH>;
+			color = <LED_COLOR_ID_GREEN>;
+			function = LED_FUNCTION_CHARGING;
+		};
+	};
+
+	lcd_vci: regulator-lcd-vci {
+		compatible = "regulator-fixed";
+		regulator-name = "lcd_vci";
+		gpio = <&tlmm 33 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+		/* the LP8556 backlight IC hangs off these rails and loses its config otherwise */
+		regulator-always-on;
+		pinctrl-0 = <&lcd_power_default>;
+		pinctrl-names = "default";
+	};
+
+	lcd_iovcc: regulator-lcd-iovcc {
+		compatible = "regulator-fixed";
+		regulator-name = "lcd_iovcc";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		gpio = <&tlmm 38 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+		/* the LP8556 backlight IC hangs off these rails and loses its config otherwise */
+		regulator-always-on;
+		/* lcdkit: 30 ms after IOVCC before reset */
+		startup-delay-us = <30000>;
+	};
+
+	lcd_bl_en: regulator-lcd-bl-en {
+		compatible = "regulator-fixed";
+		regulator-name = "lcd_bl_en";
+		gpio = <&tlmm 50 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+		/* the LP8556 backlight IC hangs off these rails and loses its config otherwise */
+		regulator-always-on;
+	};
+
+	ts_vdd: regulator-ts-vdd {
+		compatible = "regulator-fixed";
+		regulator-name = "ts_vdd";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+		gpio = <&tlmm 62 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+		startup-delay-us = <5000>;
+		pinctrl-0 = <&ts_power_default>;
+		pinctrl-names = "default";
+	};
+
+	ts_vddio: regulator-ts-vddio {
+		compatible = "regulator-fixed";
+		regulator-name = "ts_vddio";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		gpio = <&tlmm 17 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+		startup-delay-us = <5000>;
+	};
+
+	/* Rear camera analog (2.8 V) and I/O (1.8 V) rails, switched by GPIOs */
+	cam_vana: regulator-cam-vana {
+		compatible = "regulator-fixed";
+		regulator-name = "cam_vana";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+		gpio = <&tlmm 132 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		vin-supply = <&pm8937_l22>;
+		pinctrl-0 = <&cam_rear_power_default>;
+		pinctrl-names = "default";
+	};
+
+	cam_vio: regulator-cam-vio {
+		compatible = "regulator-fixed";
+		regulator-name = "cam_vio";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		gpio = <&tlmm 133 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		vin-supply = <&pm8937_l6>;
+	};
+
+	vph_pwr: regulator-vph-pwr {
+		compatible = "regulator-fixed";
+		regulator-name = "vph_pwr";
+		regulator-min-microvolt = <3700000>;
+		regulator-max-microvolt = <3700000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+};
+
+/*
+ * Huawei's modem image is 106 MiB (0x86800000-0x8d200000), larger than the
+ * generic ranges assume; let the dynamic firmware regions use the whole
+ * firmware hole up to 0x8ee00000 like the downstream layout does.
+ */
+/* Huawei's ADSP image is linked for this fixed address (Android: adsp_fw_region) */
+&adsp_mem {
+	/delete-property/ size;
+	/delete-property/ alignment;
+	/delete-property/ alloc-ranges;
+	reg = <0x0 0x8d200000 0x0 0x1500000>;
+};
+
+&gps_mem {
+	alloc-ranges = <0x0 0x86800000 0x0 0x9800000>;
+};
+
+&mba_mem {
+	alloc-ranges = <0x0 0x86800000 0x0 0x9800000>;
+};
+
+&venus_mem {
+	alloc-ranges = <0x0 0x86800000 0x0 0x9800000>;
+};
+
+/* Android: wcnss_fw_region */
+&wcnss_mem {
+	/delete-property/ size;
+	/delete-property/ alignment;
+	/delete-property/ alloc-ranges;
+	reg = <0x0 0x8e700000 0x0 0x700000>;
+};
+
+&adsp {
+	status = "okay";
+};
+
+&adsp_mem {
+	status = "okay";
+};
+
+&apr {
+	status = "okay";
+};
+
+/* BLSP1 QUP1 is not described in msm8937.dtsi; Huawei uses it for the backlight IC */
+&soc {
+	blsp1_i2c1: i2c@78b5000 {
+		compatible = "qcom,i2c-qup-v2.2.1";
+		reg = <0x078b5000 0x600>;
+		interrupts = <GIC_SPI 95 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&gcc MSM8937_GCC_BLSP1_QUP1_I2C_APPS_CLK>,
+			 <&gcc GCC_BLSP1_AHB_CLK>;
+		clock-names = "core", "iface";
+		dmas = <&blsp1_dma 4>,
+		       <&blsp1_dma 5>;
+		dma-names = "tx", "rx";
+		pinctrl-0 = <&blsp1_i2c1_default>;
+		pinctrl-1 = <&blsp1_i2c1_sleep>;
+		pinctrl-names = "default", "sleep";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "disabled";
+	};
+};
+
+&camss {
+	vdda-supply = <&pm8937_l2>;
+	status = "okay";
+
+	ports {
+		port@0 {
+			reg = <0>;
+
+			csiphy0_ep: endpoint {
+				clock-lanes = <7>;
+				data-lanes = <0 1 2 3>;
+				remote-endpoint = <&rear_cam_ep>;
+			};
+		};
+
+		port@1 {
+			reg = <1>;
+
+			csiphy1_ep: endpoint {
+				clock-lanes = <7>;
+				data-lanes = <0 1 2 3>;
+				remote-endpoint = <&front_cam_ep>;
+			};
+		};
+	};
+};
+
+&cci {
+	pinctrl-0 = <&cci0_default>, <&cci1_default>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+/* Rear camera: Hynix Hi-846 8 MP ("hi846_synology_1p0j0_pad"), CSIPHY0, I2C 0x23 (AF actuator at 0x0c) */
+&cci_i2c0 {
+	camera-sensor@23 {
+		compatible = "hynix,hi846";
+		reg = <0x23>;
+
+		clocks = <&gcc GCC_CAMSS_MCLK0_CLK>;
+		assigned-clocks = <&gcc GCC_CAMSS_MCLK0_CLK>;
+		assigned-clock-rates = <24000000>;
+
+		pinctrl-0 = <&cam_rear_default>, <&camss_mclk0_default>;
+		pinctrl-names = "default";
+
+		reset-gpios = <&tlmm 36 GPIO_ACTIVE_LOW>;
+		shutdown-gpios = <&tlmm 35 GPIO_ACTIVE_LOW>;
+
+		vddio-supply = <&cam_vio>;
+		vdda-supply = <&cam_vana>;
+		vddd-supply = <&pm8937_l23>;
+
+		orientation = <1>;
+		rotation = <270>;
+		lens-focus = <&rear_cam_vcm>;
+
+		port {
+			rear_cam_ep: endpoint {
+				data-lanes = <0 1 2 3>;
+				link-frequencies = /bits/ 64 <80000000 200000000>;
+				remote-endpoint = <&csiphy0_ep>;
+			};
+		};
+	};
+
+	rear_cam_vcm: actuator@c {
+		compatible = "dongwoon,dw9714";
+		reg = <0x0c>;
+		vcc-supply = <&pm8937_l17>;
+	};
+};
+
+/*
+ * Front camera, CSIPHY1: Hynix Hi-846 ("hi846_huaquan_h7b8_pad"), I2C
+ * address 0x21 (chip id verified). Shares the VANA/VIO switches with the
+ * rear camera.
+ */
+&cci_i2c1 {
+	camera-sensor@21 {
+		compatible = "hynix,hi846";
+		reg = <0x21>;
+
+		clocks = <&gcc GCC_CAMSS_MCLK2_CLK>;
+		assigned-clocks = <&gcc GCC_CAMSS_MCLK2_CLK>;
+		assigned-clock-rates = <24000000>;
+
+		pinctrl-0 = <&cam_front_default>, <&camss_mclk2_default>;
+		pinctrl-names = "default";
+
+		reset-gpios = <&tlmm 40 GPIO_ACTIVE_LOW>;
+
+		vddio-supply = <&cam_vio>;
+		vdda-supply = <&cam_vana>;
+		vddd-supply = <&pm8937_l23>;
+
+		orientation = <0>;
+		rotation = <90>;
+
+		port {
+			front_cam_ep: endpoint {
+				data-lanes = <0 1 2 3>;
+				link-frequencies = /bits/ 64 <80000000 200000000>;
+				remote-endpoint = <&csiphy1_ep>;
+			};
+		};
+	};
+};
+
+&blsp1_i2c1 {
+	status = "okay";
+
+	backlight: backlight@2c {
+		compatible = "ti,lp8556";
+		reg = <0x2c>;
+
+		/* Values from Huawei's downstream lp8556 driver */
+		dev-ctrl = /bits/ 8 <0x87>;
+		init-brt = /bits/ 8 <0x80>;
+
+		power-supply = <&pm8937_l6>;
+		enable-supply = <&lcd_bl_en>;
+
+		rom-16h {
+			rom-addr = /bits/ 8 <0x16>;
+			rom-val = /bits/ 8 <0x0f>;
+		};
+
+		rom-a6h {
+			rom-addr = /bits/ 8 <0xa6>;
+			rom-val = /bits/ 8 <0x40>;
+		};
+
+		rom-a0h {
+			rom-addr = /bits/ 8 <0xa0>;
+			rom-val = /bits/ 8 <0xff>;
+		};
+
+		rom-a1h {
+			rom-addr = /bits/ 8 <0xa1>;
+			rom-val = /bits/ 8 <0x3f>;
+		};
+
+		rom-a5h {
+			rom-addr = /bits/ 8 <0xa5>;
+			rom-val = /bits/ 8 <0x2b>;
+		};
+	};
+};
+
+&blsp1_i2c2 {
+	status = "okay";
+
+	/* Two TI TAS2560 class-D speaker amplifiers (left/right) on QUINARY_MI2S. */
+	speaker_amp_l: audio-codec@4c {
+		compatible = "ti,tas2560";
+		reg = <0x4c>;
+		reset-gpios = <&tlmm 19 GPIO_ACTIVE_LOW>;
+		vdd-supply = <&pm8937_l6>;
+		pinctrl-0 = <&speaker_amp_default>;
+		pinctrl-names = "default";
+		#sound-dai-cells = <0>;
+		sound-name-prefix = "Speaker L";
+		ti,channel = <0>;
+	};
+
+	speaker_amp_r: audio-codec@4f {
+		compatible = "ti,tas2560";
+		reg = <0x4f>;
+		reset-gpios = <&tlmm 19 GPIO_ACTIVE_LOW>;
+		vdd-supply = <&pm8937_l6>;
+		#sound-dai-cells = <0>;
+		sound-name-prefix = "Speaker R";
+		ti,channel = <1>;
+	};
+};
+
+&blsp1_i2c3 {
+	status = "okay";
+
+	/*
+	 * The touchscreen controller depends on the display module.
+	 * lk2nd enables the matching node based on the detected panel.
+	 */
+	/* Novatek NT36xxx-family "hybrid" controller (downstream: novatek_hybrid / NVTtouch_207) */
+	touchscreen@62 {
+		compatible = "novatek,nt36525-i2c";
+		reg = <0x62>;
+
+		interrupts-extended = <&tlmm 65 IRQ_TYPE_EDGE_RISING>;
+		reset-gpios = <&tlmm 64 GPIO_ACTIVE_LOW>;
+
+		vdd-supply = <&ts_vdd>;
+		vio-supply = <&ts_vddio>;
+
+		pinctrl-0 = <&ts_int_rst_default>;
+		pinctrl-names = "default";
+
+		touchscreen-size-x = <1200>;
+		touchscreen-size-y = <1920>;
+
+		status = "disabled";
+	};
+
+	touchscreen@48 {
+		compatible = "himax,hx852es";
+		reg = <0x48>;
+
+		interrupts-extended = <&tlmm 65 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&tlmm 64 GPIO_ACTIVE_LOW>;
+
+		vcca-supply = <&ts_vdd>;
+		vccd-supply = <&ts_vddio>;
+
+		pinctrl-0 = <&ts_int_rst_default>;
+		pinctrl-names = "default";
+
+		touchscreen-size-x = <1200>;
+		touchscreen-size-y = <1920>;
+
+		status = "disabled";
+	};
+};
+
+&blsp1_uart2 {
+	status = "okay";
+};
+
+&gps_mem {
+	status = "okay";
+};
+
+&gpu {
+	status = "okay";
+};
+
+&ipa {
+	status = "okay";
+};
+
+&lpass_codec {
+	status = "okay";
+};
+
+&mba_mem {
+	status = "okay";
+};
+
+&mdss {
+	status = "okay";
+};
+
+&mdss_dsi0 {
+	vdda-supply = <&pm8937_l2>;
+	vddio-supply = <&pm8937_l6>;
+
+	status = "okay";
+
+	panel: panel@0 {
+		reg = <0>;
+
+		reset-gpios = <&tlmm 1 GPIO_ACTIVE_LOW>;
+		vci-supply = <&lcd_vci>;
+		iovcc-supply = <&lcd_iovcc>;
+		backlight = <&backlight>;
+
+		pinctrl-0 = <&lcd_reset_default>;
+		pinctrl-names = "default";
+
+		port {
+			panel_in: endpoint {
+				remote-endpoint = <&mdss_dsi0_out>;
+			};
+		};
+	};
+};
+
+&mdss_dsi0_out {
+	data-lanes = <0 1 2 3>;
+	remote-endpoint = <&panel_in>;
+};
+
+&mdss_dsi0_phy {
+	vddio-supply = <&pm8937_l6>;
+	qcom,dsi-phy-regulator-ldo-mode;
+
+	status = "okay";
+};
+
+&memshare {
+	status = "okay";
+};
+
+&modem {
+	mss-supply = <&pm8937_s1>;
+	pll-supply = <&pm8937_l7>;
+	status = "okay";
+};
+
+&mpss_mem {
+	reg = <0x0 0x86800000 0x0 0x6a00000>;
+	status = "okay";
+};
+
+&pm8937_resin {
+	linux,code = <KEY_VOLUMEDOWN>;
+	status = "okay";
+};
+
+&pm8937_spmi_regulators {
+	/* PM8937 S5 + S6 = VDD_APC supply */
+	pm8937_s5: s5 {
+		regulator-min-microvolt = <1050000>;
+		regulator-max-microvolt = <1350000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+};
+
+&pmi8950_fg {
+	power-supplies = <&pmi8950_smbcharger>;
+	status = "okay";
+};
+
+&pmi8950_haptics {
+	qcom,actuator-type = <HAP_TYPE_ERM>;
+	qcom,brake-pattern = <0x3 0x3 0x0 0x0>;
+	qcom,wave-play-rate-us = <5263>;
+	qcom,wave-shape = <HAP_WAVE_SQUARE>;
+	qcom,vmax-millivolt = <3200>;
+
+	status = "okay";
+};
+
+&pmi8950_smbcharger {
+	status = "okay";
+};
+
+/* Huawei moved the QSEECOM region: 0x85b00000, 13 MiB */
+&qseecom_mem {
+	reg = <0x0 0x85b00000 0x0 0xd00000>;
+};
+
+&rpm_requests {
+	regulators-0 {
+		compatible = "qcom,rpm-pm8937-regulators";
+
+		vdd_s1-supply = <&vph_pwr>;
+		vdd_s2-supply = <&vph_pwr>;
+		vdd_s3-supply = <&vph_pwr>;
+		vdd_s4-supply = <&vph_pwr>;
+
+		vdd_l1_l19-supply = <&pm8937_s3>;
+		vdd_l2_l23-supply = <&pm8937_s3>;
+		vdd_l3-supply = <&pm8937_s3>;
+		vdd_l4_l5_l6_l7_l16-supply = <&pm8937_s4>;
+		vdd_l8_l11_l12_l17_l22-supply = <&vph_pwr>;
+		vdd_l9_l10_l13_l14_l15_l18-supply = <&vph_pwr>;
+
+		pm8937_s1: s1 {
+			regulator-min-microvolt = <1000000>;
+			regulator-max-microvolt = <1225000>;
+		};
+
+		/* S2: VDD_CX */
+
+		pm8937_s3: s3 {
+			regulator-min-microvolt = <1300000>;
+			regulator-max-microvolt = <1300000>;
+		};
+
+		pm8937_s4: s4 {
+			regulator-min-microvolt = <2050000>;
+			regulator-max-microvolt = <2050000>;
+		};
+
+		pm8937_l2: l2 {
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1200000>;
+		};
+
+		/* L3: VDD_MX */
+
+		pm8937_l5: l5 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+		};
+
+		pm8937_l6: l6 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-always-on;
+		};
+
+		pm8937_l7: l7 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+		};
+
+		pm8937_l8: l8 {
+			regulator-min-microvolt = <2950000>;
+			regulator-max-microvolt = <2950000>;
+		};
+
+		pm8937_l9: l9 {
+			regulator-min-microvolt = <3000000>;
+			regulator-max-microvolt = <3300000>;
+		};
+
+		pm8937_l10: l10 {
+			regulator-min-microvolt = <2800000>;
+			regulator-max-microvolt = <3000000>;
+			regulator-always-on;
+		};
+
+		pm8937_l11: l11 {
+			regulator-min-microvolt = <2950000>;
+			regulator-max-microvolt = <2950000>;
+			regulator-allow-set-load;
+			regulator-system-load = <200000>;
+		};
+
+		pm8937_l12: l12 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <2950000>;
+		};
+
+		pm8937_l13: l13 {
+			regulator-min-microvolt = <3075000>;
+			regulator-max-microvolt = <3075000>;
+		};
+
+		pm8937_l14: l14 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <3300000>;
+		};
+
+		pm8937_l15: l15 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <3300000>;
+		};
+
+		pm8937_l16: l16 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+		};
+
+		pm8937_l17: l17 {
+			regulator-min-microvolt = <2800000>;
+			regulator-max-microvolt = <2900000>;
+		};
+
+		pm8937_l19: l19 {
+			regulator-min-microvolt = <1225000>;
+			regulator-max-microvolt = <1350000>;
+		};
+
+		pm8937_l22: l22 {
+			regulator-min-microvolt = <2800000>;
+			regulator-max-microvolt = <2800000>;
+		};
+
+		pm8937_l23: l23 {
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1200000>;
+		};
+	};
+};
+
+/* eMMC */
+&sdhc_1 {
+	vmmc-supply = <&pm8937_l8>;
+	vqmmc-supply = <&pm8937_l5>;
+	status = "okay";
+};
+
+/* microSD */
+&sdhc_2 {
+	cd-gpios = <&tlmm 67 GPIO_ACTIVE_HIGH>;
+	vmmc-supply = <&pm8937_l11>;
+	vqmmc-supply = <&pm8937_l12>;
+	pinctrl-0 = <&sdc2_default &sdc2_cd_default>;
+	pinctrl-1 = <&sdc2_sleep &sdc2_cd_default>;
+	pinctrl-names = "default", "sleep";
+	status = "okay";
+};
+
+&sleep_clk {
+	clock-frequency = <32768>;
+};
+
+&q6afedai {
+	dai@127 {
+		reg = <QUINARY_MI2S_RX>;
+		qcom,sd-lines = <0>;
+	};
+};
+
+&sound {
+	pinctrl-0 = <&cdc_pdm_lines_default &pri_mi2s_default &pri_mi2s_ws_default>;
+	pinctrl-1 = <&cdc_pdm_lines_sleep &pri_mi2s_sleep &pri_mi2s_ws_sleep>;
+	pinctrl-names = "default", "sleep";
+
+	audio-routing =
+		"AMIC1", "MIC BIAS External1",
+		"AMIC2", "MIC BIAS Internal2",
+		"Speaker L ASI1", "QUIN_MI2S_RX",
+		"Speaker R ASI1", "QUIN_MI2S_RX",
+		"MM_DL1", "MultiMedia1 Playback",
+		"MM_DL3", "MultiMedia3 Playback",
+		"MM_DL4", "MultiMedia4 Playback",
+		"MultiMedia2 Capture", "MM_UL2";
+
+	status = "okay";
+
+	/* Two TAS2560 amplifiers on the external MI2S lines (AFE "quinary") */
+	quinary-mi2s-dai-link {
+		link-name = "Quinary MI2S";
+		cpu {
+			sound-dai = <&q6afedai QUINARY_MI2S_RX>;
+		};
+
+		platform {
+			sound-dai = <&q6routing>;
+		};
+
+		codec {
+			sound-dai = <&speaker_amp_l>, <&speaker_amp_r>;
+		};
+	};
+};
+
+&tlmm {
+	gpio-reserved-ranges = <20 4>;
+
+	blsp1_i2c1_default: blsp1-i2c1-default-state {
+		pins = "gpio2", "gpio3";
+		function = "blsp_i2c1";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	blsp1_i2c1_sleep: blsp1-i2c1-sleep-state {
+		pins = "gpio2", "gpio3";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	cam_rear_default: cam-rear-default-state {
+		pins = "gpio35", "gpio36";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	cam_front_default: cam-front-default-state {
+		pins = "gpio40";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	cam_rear_power_default: cam-rear-power-default-state {
+		pins = "gpio132", "gpio133";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	gpio_keys_default: gpio-keys-default-state {
+		pins = "gpio91";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	gpio_leds_default: gpio-leds-default-state {
+		pins = "gpio125", "gpio128";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	hall_sensor_default: hall-sensor-default-state {
+		pins = "gpio127";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	lcd_power_default: lcd-power-default-state {
+		pins = "gpio33", "gpio38", "gpio50";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-disable;
+	};
+
+	lcd_reset_default: lcd-reset-default-state {
+		pins = "gpio1";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-disable;
+	};
+
+	pri_mi2s_default: pri-mi2s-default-state {
+		pins = "gpio85", "gpio86", "gpio88";
+		function = "pri_mi2s";
+		drive-strength = <8>;
+		bias-disable;
+	};
+
+	pri_mi2s_ws_default: pri-mi2s-ws-default-state {
+		pins = "gpio87";
+		function = "pri_mi2s_ws";
+		drive-strength = <8>;
+		bias-disable;
+	};
+
+	pri_mi2s_sleep: pri-mi2s-sleep-state {
+		pins = "gpio85", "gpio86", "gpio88";
+		function = "pri_mi2s";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	pri_mi2s_ws_sleep: pri-mi2s-ws-sleep-state {
+		pins = "gpio87";
+		function = "pri_mi2s_ws";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	sdc2_cd_default: sdc2-cd-default-state {
+		pins = "gpio67";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	speaker_amp_default: speaker-amp-default-state {
+		pins = "gpio19";
+		function = "gpio";
+		drive-strength = <6>;
+		bias-pull-up;
+	};
+
+	ts_int_rst_default: ts-int-rst-default-state {
+		pins = "gpio64", "gpio65";
+		function = "gpio";
+		drive-strength = <6>;
+		bias-disable;
+	};
+
+	ts_power_default: ts-power-default-state {
+		pins = "gpio17", "gpio62";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+};
+
+&usb {
+	dr_mode = "otg";
+	extcon = <&pmi8950_smbcharger>, <&pmi8950_smbcharger>;
+	vbus-supply = <&otg_vbus>;
+	status = "okay";
+};
+
+&usb_hs_phy {
+	vdd-supply = <&pm8937_l2>;
+	vdda1p8-supply = <&pm8937_l7>;
+	vdda3p3-supply = <&pm8937_l13>;
+	status = "okay";
+};
+
+&venus {
+	status = "okay";
+};
+
+&venus_mem {
+	status = "okay";
+};
+
+&wcd_codec {
+	qcom,hphl-jack-type-normally-open;
+	qcom,mbhc-vthreshold-high = <87 120 215 475 500>;
+	qcom,mbhc-vthreshold-low = <87 120 210 450 485>;
+	qcom,micbias2-ext-cap;
+
+	vdd-cdc-io-supply = <&pm8937_l5>;
+	vdd-cdc-tx-rx-cx-supply = <&pm8937_s4>;
+	vdd-micbias-supply = <&pm8937_l13>;
+	status = "okay";
+};
+
+&wcnss {
+	vddpx-supply = <&pm8937_l5>;
+	status = "okay";
+};
+
+&wcnss_iris {
+	compatible = "qcom,wcn3680";
+	vddxo-supply = <&pm8937_l7>;
+	vddrfa-supply = <&pm8937_l19>;
+	vddpa-supply = <&pm8937_l9>;
+	vdddig-supply = <&pm8937_l5>;
+};
+
+&wcnss_mem {
+	status = "okay";
+};
+
+&xo_board {
+	clock-frequency = <19200000>;
+};

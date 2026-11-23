@@ -647,9 +647,9 @@ static int pmi8994_fg_get_property(struct power_supply *psy,
 				val->intval = POWER_SUPPLY_STATUS_UNKNOWN;
 				break;
 			}
-			if (temp < 0)
+			if (temp > 0)
 				val->intval = POWER_SUPPLY_STATUS_CHARGING;
-			else if (temp > 0)
+			else if (temp < 0)
 				val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
 			else
 				val->intval = POWER_SUPPLY_STATUS_NOT_CHARGING;
@@ -843,8 +843,8 @@ static int pmi8994_fg_notifier_call(struct notifier_block *nb, unsigned long val
 		ret = power_supply_get_property(psy, POWER_SUPPLY_PROP_STATUS, &propval);
 		if (ret)
 			chip->status = POWER_SUPPLY_STATUS_UNKNOWN;
-
-		chip->status = propval.intval;
+		else
+			chip->status = propval.intval;
 
 		power_supply_changed(chip->batt_psy);
 
@@ -1074,12 +1074,20 @@ static int pmi8994_fg_probe(struct platform_device *pdev)
 	}
 
 	if (chip->chg_psy) {
+		union power_supply_propval propval;
+
 		ret = power_supply_reg_notifier(&chip->nb);
 		if (ret) {
 			dev_err(chip->dev,
 				"Failed to register notifier: %d\n", ret);
 			return ret;
 		}
+
+		ret = power_supply_get_property(chip->chg_psy,
+						POWER_SUPPLY_PROP_STATUS,
+						&propval);
+		if (!ret)
+			chip->status = propval.intval;
 	}
 
 	return 0;

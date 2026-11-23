@@ -51,18 +51,13 @@ static void qcom_smgr_unregister_sensor(void *data)
 	platform_device_unregister(pdev);
 }
 
-static int qcom_smgr_register_sensor(struct qcom_smgr *smgr,
-				     struct qcom_smgr_sensor *sensor)
+static int qcom_smgr_register_pdev(struct qcom_smgr *smgr,
+				   struct qcom_smgr_sensor *sensor,
+				   const char *name, int id)
 {
 	struct platform_device *pdev;
-	const char *name;
 
-	if (sensor->type == SNS_SMGR_SENSOR_TYPE_UNKNOWN)
-		return -ENODEV;
-
-	name = qcom_smgr_sensor_type_platform_names[sensor->type];
-
-	pdev = platform_device_register_data(smgr->dev, name, sensor->id,
+	pdev = platform_device_register_data(smgr->dev, name, id,
 					     &sensor, sizeof(sensor));
 	if (IS_ERR(pdev)) {
 		dev_err(smgr->dev, "Failed to register %s: %pe\n", name, pdev);
@@ -71,6 +66,32 @@ static int qcom_smgr_register_sensor(struct qcom_smgr *smgr,
 
 	return devm_add_action_or_reset(smgr->dev, qcom_smgr_unregister_sensor,
 					pdev);
+}
+
+static int qcom_smgr_register_sensor(struct qcom_smgr *smgr,
+				     struct qcom_smgr_sensor *sensor)
+{
+	int ret = -ENODEV;
+
+	if (sensor->type != SNS_SMGR_SENSOR_TYPE_UNKNOWN)
+		ret = qcom_smgr_register_pdev(smgr, sensor,
+			qcom_smgr_sensor_type_platform_names[sensor->type],
+			sensor->id);
+
+	/*
+	 * Ambient light sensors are exposed as the secondary data type of a
+	 * PROX_LIGHT sensor (the primary one may even be empty, e.g. when the
+	 * proximity function is provided by a separate SAR sensor). Match on
+	 * the data type name since the sensor type string is not reliable.
+	 */
+	if (sensor->data_type_count > SNS_SMGR_DATA_TYPE_SECONDARY &&
+	    sensor->data_types[SNS_SMGR_DATA_TYPE_SECONDARY].name &&
+	    (strstr(sensor->data_types[SNS_SMGR_DATA_TYPE_SECONDARY].name, "ALS") ||
+	     strstr(sensor->data_types[SNS_SMGR_DATA_TYPE_SECONDARY].name, "LIGHT")))
+		ret = qcom_smgr_register_pdev(smgr, sensor, "qcom-smgr-light",
+					      sensor->id + SNS_SMGR_DATA_TYPE_SECONDARY);
+
+	return ret;
 }
 
 static int qcom_smgr_request_all_sensor_info(struct qcom_smgr *smgr,
@@ -207,14 +228,17 @@ static int qcom_smgr_request_single_sensor_info(struct qcom_smgr *smgr,
 
 static int qcom_smgr_request_buffering(struct qcom_smgr *smgr,
 				       struct qcom_smgr_sensor *sensor,
+				       enum qcom_smgr_data_type data_type,
 				       bool enable)
 {
+	struct qcom_smgr_data_type_item *dt = &sensor->data_types[data_type];
 	struct sns_smgr_buffering_req req = {
 		/*
-		 * Reuse sensor ID as a report ID to avoid having to keep track
-		 * of a separate set of IDs
+		 * Reuse sensor ID (plus data type index) as a report ID to
+		 * avoid having to keep track of a separate set of IDs. Sensor
+		 * IDs are multiples of 10, so there is room for the offset.
 		 */
-		.report_id = sensor->id,
+		.report_id = sensor->id + data_type,
 		.notify_suspend_valid = false
 	};
 	struct sns_smgr_buffering_resp resp = {};
@@ -238,24 +262,22 @@ static int qcom_smgr_request_buffering(struct qcom_smgr *smgr,
 		 * report rate such that every report contains only 1 sample.
 		 * This gives us the lowest latency.
 		 */
-		if (sensor->data_types[0].native_sample_rates)
-			sample_rate = sensor->data_types[0].native_sample_rates
-					[sensor->data_types[0]
-						 .native_sample_rate_count - 1];
+		if (dt->native_sample_rates)
+			sample_rate = dt->native_sample_rates
+					[dt->native_sample_rate_count - 1];
 
 		/*
 		 * SMGR may support a lower maximum sample rate than natively
 		 * supported by the sensor.
 		 */
-		if (sample_rate == 0 ||
-		    sample_rate > sensor->data_types[0].max_sample_rate)
-			sample_rate = sensor->data_types[0].max_sample_rate;
+		if (sample_rate == 0 || sample_rate > dt->max_sample_rate)
+			sample_rate = dt->max_sample_rate;
 
 		req.report_rate = sample_rate * SMGR_REPORT_RATE_HZ;
 
 		req.item_len = 1;
 		req.items[0].sensor_id = sensor->id;
-		req.items[0].data_type = SNS_SMGR_DATA_TYPE_PRIMARY;
+		req.items[0].data_type = data_type;
 
 		req.items[0].sampling_rate = sample_rate;
 
@@ -299,7 +321,7 @@ static int qcom_smgr_request_buffering(struct qcom_smgr *smgr,
 	}
 
 	/* Keep track of requested sample rate */
-	sensor->data_types[0].cur_sample_rate = sample_rate;
+	dt->cur_sample_rate = sample_rate;
 
 	return 0;
 }
@@ -314,16 +336,21 @@ static void qcom_smgr_buffering_report_handler(struct qmi_handle *hdl,
 	struct sns_smgr_buffering_report_ind *ind =
 		(struct sns_smgr_buffering_report_ind *)data;
 	struct qcom_smgr_sensor *sensor;
+	struct iio_dev *iio_dev;
 	u8 i;
 
 	for (i = 0; i < smgr->sensor_count; ++i) {
 		sensor = &smgr->sensors[i];
 
-		/* Find sensor matching report */
-		if (sensor->id != ind->report_id)
+		/* Find sensor and data type matching report */
+		if (ind->report_id == sensor->id + SNS_SMGR_DATA_TYPE_PRIMARY)
+			iio_dev = sensor->iio_dev;
+		else if (ind->report_id == sensor->id + SNS_SMGR_DATA_TYPE_SECONDARY)
+			iio_dev = sensor->iio_dev_secondary;
+		else
 			continue;
 
-		if (!sensor->iio_dev)
+		if (!iio_dev)
 			/* Corresponding driver was unloaded. Ignore remaining reports. */
 			return;
 
@@ -331,7 +358,7 @@ static void qcom_smgr_buffering_report_handler(struct qmi_handle *hdl,
 		 * Since we are matching report rate with sample rate, we only
 		 * get a single sample in every report.
 		 */
-		iio_push_to_buffers_with_timestamp(sensor->iio_dev,
+		iio_push_to_buffers_with_timestamp(iio_dev,
 						   ind->samples[0].values,
 						   ind->metadata.timestamp);
 
@@ -356,7 +383,7 @@ static int qcom_smgr_sensor_postenable(struct iio_dev *iio_dev)
 	struct qcom_smgr_iio_priv *priv = iio_priv(iio_dev);
 	struct qcom_smgr_sensor *sensor = priv->sensor;
 
-	return qcom_smgr_request_buffering(smgr, sensor, true);
+	return qcom_smgr_request_buffering(smgr, sensor, priv->data_type, true);
 }
 
 static int qcom_smgr_sensor_postdisable(struct iio_dev *iio_dev)
@@ -365,7 +392,7 @@ static int qcom_smgr_sensor_postdisable(struct iio_dev *iio_dev)
 	struct qcom_smgr_iio_priv *priv = iio_priv(iio_dev);
 	struct qcom_smgr_sensor *sensor = priv->sensor;
 
-	return qcom_smgr_request_buffering(smgr, sensor, false);
+	return qcom_smgr_request_buffering(smgr, sensor, priv->data_type, false);
 }
 
 const struct iio_buffer_setup_ops qcom_smgr_buffer_ops = {
@@ -382,7 +409,7 @@ static int qcom_smgr_iio_read_raw(struct iio_dev *iio_dev,
 
 	switch (mask) {
 	case IIO_CHAN_INFO_SAMP_FREQ:
-		*val = priv->sensor->data_types[0].cur_sample_rate;
+		*val = priv->sensor->data_types[priv->data_type].cur_sample_rate;
 		return IIO_VAL_INT;
 	case IIO_CHAN_INFO_SCALE:
 		switch (chan->type) {
@@ -400,7 +427,7 @@ static int qcom_smgr_iio_read_raw(struct iio_dev *iio_dev,
 			 * numerator and denominator, and move the -1 coefficient to the
 			 * denominator. This way we can exactly fit within the lower bound of int.
 			 */
-			*val = priv->sensor->data_types[0].range / 2;
+			*val = priv->sensor->data_types[priv->data_type].range / 2;
 			*val2 = -SMGR_VALUE_DIV / 2 * SMGR_VALUE_DIV;
 			return IIO_VAL_FRACTIONAL;
 		default:
@@ -417,7 +444,7 @@ static int qcom_smgr_iio_read_raw(struct iio_dev *iio_dev,
 		 * Proximity values are inverted and start from the upper bound as explained above.
 		 * No other channel types have an offset.
 		 */
-		*val = priv->sensor->data_types[0].range;
+		*val = priv->sensor->data_types[priv->data_type].range;
 		*val2 = SMGR_VALUE_DIV;
 		return IIO_VAL_FRACTIONAL;
 	}
@@ -433,7 +460,7 @@ static int qcom_smgr_iio_write_raw(struct iio_dev *iio_dev,
 
 	switch (mask) {
 	case IIO_CHAN_INFO_SAMP_FREQ:
-		priv->sensor->data_types[0].cur_sample_rate = val;
+		priv->sensor->data_types[priv->data_type].cur_sample_rate = val;
 
 		/*
 		 * Send new SMGR buffering request with updated rates
@@ -455,7 +482,7 @@ static int qcom_smgr_iio_read_avail(struct iio_dev *iio_dev,
 {
 	struct qcom_smgr_iio_priv *priv = iio_priv(iio_dev);
 	const int samp_freq_vals[3] = {
-		1, 1, priv->sensor->data_types[0].cur_sample_rate
+		1, 1, priv->sensor->data_types[priv->data_type].cur_sample_rate
 	};
 
 	switch (mask) {
@@ -547,8 +574,8 @@ static int qcom_smgr_probe(struct qrtr_device *qdev)
 
 		for (j = 0; j < smgr->sensors[i].data_type_count; j++) {
 			/* Default to maximum sample rate */
-			smgr->sensors[i].data_types->cur_sample_rate =
-				smgr->sensors[i].data_types->max_sample_rate;
+			smgr->sensors[i].data_types[j].cur_sample_rate =
+				smgr->sensors[i].data_types[j].max_sample_rate;
 
 			dev_dbg(smgr->dev, "0x%02x,%d: %s %s\n",
 				smgr->sensors[i].id, j,

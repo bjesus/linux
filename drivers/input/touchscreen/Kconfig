@@ -679,6 +679,17 @@ config TOUCHSCREEN_MTOUCH
 	  To compile this driver as a module, choose M here: the
 	  module will be called mtouch.
 
+config TOUCHSCREEN_NT36XXX
+	tristate "Novatek NT36XXX In-Cell I2C touchscreen controller"
+	depends on I2C
+	select REGMAP_I2C
+	help
+	  Say Y here if you have a Novatek NT36xxx series In-Cell
+	  touchscreen connected to your system over I2C.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called nt36xxx.
+
 config TOUCHSCREEN_NOVATEK_NVT_TS
 	tristate "Novatek NT11205 touchscreen support"
 	depends on I2C
