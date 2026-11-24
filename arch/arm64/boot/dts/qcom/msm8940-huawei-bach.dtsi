@@ -218,6 +218,13 @@
 		gpio = <&tlmm 133 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
 		vin-supply = <&pm8937_l6>;
+		/*
+		 * Also powers the I2C side of the rear AF actuator (dw9714), which
+		 * has no second supply property: keep it on so the VCM's probe-time
+		 * I2C access cannot time out on the CCI master and corrupt the
+		 * concurrent Hi-846 chip-id read (seen as "i2c read error: -6").
+		 */
+		regulator-always-on;
 	};
 
 	vph_pwr: regulator-vph-pwr {
